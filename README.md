@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚗 CarSage
+# 🚗 CarQuantile
 
 **Used-car price prediction with calibrated quantile ranges, powered by NVIDIA Kumo Tabular. No training required.**
 
@@ -17,7 +17,7 @@
 
 ## 📌 Overview
 
-CarSage predicts the resale price of a used car as a **median estimate plus an
+CarQuantile predicts the resale price of a used car as a **median estimate plus an
 80% quantile range** (10th to 90th percentile), for example:
 
 > **₹5.1 lakh**, likely between **₹4.5 and ₹5.8 lakh**
@@ -82,7 +82,7 @@ flowchart LR
 ## 📁 Project Structure
 
 ```
-CarSage/
+carquantile/
 ├── app.py                 # Streamlit UI (Phase 2)
 ├── src/
 │   ├── data_prep.py       # load, clean, split 80/20

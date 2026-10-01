@@ -19,7 +19,7 @@ DEMO_ROWS = 5
 
 
 def main() -> int:
-    print("CarSage — Kumo Tabular demo")
+    print("CarQuantile — Kumo Tabular demo")
     print("=" * 62)
 
     # 1. Data -------------------------------------------------------------

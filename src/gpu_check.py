@@ -1,4 +1,4 @@
-"""GPU check for CarSage / NVIDIA Kumo Tabular.
+"""GPU check for CarQuantile / NVIDIA Kumo Tabular.
 
 Run me first:   python -m src.gpu_check
 
@@ -19,7 +19,7 @@ import sys
 
 def _print_header() -> None:
     print("=" * 62)
-    print("CarSage GPU check")
+    print("CarQuantile GPU check")
     print("=" * 62)
     print(f"Python : {sys.version.split()[0]}")
     print(f"Platform: {sys.platform}")

@@ -1,4 +1,4 @@
-"""Basic tests for CarSage.
+"""Basic tests for CarQuantile.
 
 Fast tests (data cleaning, input validation) always run. Tests that need the
 downloaded dataset and a CUDA GPU are skipped automatically when those are not

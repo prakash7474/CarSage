@@ -1,4 +1,4 @@
-# CarSage — Python dependencies
+# CarQuantile — Python dependencies
 #
 # IMPORTANT: two dependencies are NOT installed from this file, because they
 # need a special index / source. Install them FIRST (see README.md / NOTES.md):

@@ -138,7 +138,7 @@ def load_model(
     )
     model.eval()
     # Stash the ensemble size so predict() can reuse the same setting.
-    model._carsage_num_estimators = num_estimators
+    model._carquantile_num_estimators = num_estimators
     return model
 
 
@@ -219,7 +219,7 @@ def fit_context(model, context: Context, num_estimators: int | None = None) -> C
     context keys/values, so repeated predictions skip re-encoding the
     context. Requires the model to already be in eval mode.
     """
-    n = num_estimators or getattr(model, "_carsage_num_estimators", 1)
+    n = num_estimators or getattr(model, "_carquantile_num_estimators", 1)
     model.fit(x=context.x, y=context.y, num_estimators=n)
     context.fitted = True
     return context
@@ -285,7 +285,7 @@ def predict(
     )
 
     # --- run the forward pass -------------------------------------------
-    num_estimators = getattr(model, "_carsage_num_estimators", 1)
+    num_estimators = getattr(model, "_carquantile_num_estimators", 1)
     with torch.inference_mode():
         if context.fitted:
             # Reuse the cached context (fast path).

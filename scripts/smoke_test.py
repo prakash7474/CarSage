@@ -78,7 +78,7 @@ def make_synthetic(
 
 def main() -> int:
     print("=" * 62)
-    print("CarSage smoke test — Kumo Tabular on a synthetic table")
+    print("CarQuantile smoke test — Kumo Tabular on a synthetic table")
     print("=" * 62)
 
     if not kumo.cuda_available():
