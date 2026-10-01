@@ -1,0 +1,13 @@
+# Virtual environment
+.venv/
+
+# Downloaded dataset (large — not committed)
+data/*.csv
+
+# Generated results / caches
+results/*.csv
+__pycache__/
+*.pyc
+.pytest_cache/
+.streamlit/
+keys.csv

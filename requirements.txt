@@ -1,0 +1,36 @@
+# CarSage — Python dependencies
+#
+# IMPORTANT: two dependencies are NOT installed from this file, because they
+# need a special index / source. Install them FIRST (see README.md / NOTES.md):
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+#   pip install git+https://github.com/NVIDIA/structured-data-models.git
+#
+# They are listed as comments here only for documentation.
+# torch>=2.7                 # install from the PyTorch CUDA index (see above)
+# structured-data-models     # provides `import sdm` (install from GitHub)
+
+# Data handling
+pandas
+# pyarrow is pinned to 24.0.0: on this managed Windows machine the
+# Application Control policy (WDAC / Smart App Control) blocks the native
+# DLL of the brand-new pyarrow 25.x wheel, and pyarrow 18.x conflicts with
+# torch's bundled DLLs (c10.dll fails to initialise when pandas/pyarrow are
+# imported before torch). 24.0.0 is allowed and coexists cleanly.
+pyarrow==24.0.0
+numpy
+
+# Classical ML baseline
+# scikit-learn pinned to 1.7.2: the 1.9.x wheels ship new Cython DLLs that the
+# machine's Application Control policy blocks (same issue as pyarrow 25.x).
+scikit-learn==1.7.2
+xgboost
+
+# Web app
+streamlit
+
+# Plotting (range chart in the app, benchmark charts)
+matplotlib
+
+# Tests
+pytest
