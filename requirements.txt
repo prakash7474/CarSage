@@ -11,7 +11,11 @@
 # structured-data-models     # provides `import sdm` (install from GitHub)
 
 # Data handling
-pandas
+# pandas is pinned to 2.3.3: the 3.x wheels are so new that Windows Smart App
+# Control blocks their compiled DLLs (same issue as pyarrow 25.x / sklearn
+# 1.9.x, see NOTES.md §6). 2.3.3 is an established wheel and coexists with
+# torch 2.11 + sdm.
+pandas==2.3.3
 # pyarrow is pinned to 24.0.0: on this managed Windows machine the
 # Application Control policy (WDAC / Smart App Control) blocks the native
 # DLL of the brand-new pyarrow 25.x wheel, and pyarrow 18.x conflicts with
