@@ -95,47 +95,189 @@ def test_load_missing_file_gives_helpful_error(tmp_path):
     assert "kaggle" in str(exc.value).lower()
 
 
+_NEEDS_DATA = pytest.mark.skipif(
+    not data_prep.DATA_PATH.exists(),
+    reason="needs data/cars.csv (the dataset is not in place)",
+)
+
+
+@_NEEDS_DATA
+def test_real_dataset_has_expected_columns_and_no_missing_values():
+    clean = data_prep.clean(data_prep.load_raw())
+    assert list(clean.columns) == data_prep.FEATURE_COLUMNS + [data_prep.TARGET_COL]
+    assert clean.isna().sum().sum() == 0          # no missing values
+    assert (clean["year"] >= data_prep.MIN_YEAR).all()
+    assert (clean[data_prep.TARGET_COL] >= data_prep.MIN_PRICE).all()
+    train_df, test_df = data_prep.split(clean)
+    assert len(train_df) > len(test_df) * 3       # roughly 80/20
+
+
 # ---------------------------------------------------------------------------
 # predict() input validation (no GPU needed)
 # ---------------------------------------------------------------------------
 
+def _fake_context(**kwargs):
+    """A context that is only good enough for the validation code paths."""
+    defaults = dict(
+        feature_columns=data_prep.FEATURE_COLUMNS,
+        cat_values={},
+        num_ranges={},
+        median_price=0.0,
+    )
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+def _valid_row(**overrides) -> pd.DataFrame:
+    """One car in the app's exact schema (no price column)."""
+    row = {
+        "brand": "maruti",
+        "year": 2018,
+        "km_driven": 50_000,
+        "fuel": "Diesel",
+        "seller_type": "Individual",
+        "transmission": "Manual",
+        "owner": "First Owner",
+    }
+    row.update(overrides)
+    return pd.DataFrame([row])[data_prep.FEATURE_COLUMNS]
+
+
 def test_predict_rejects_missing_columns():
     from src import model as kumo
 
-    fake_context = SimpleNamespace(
-        feature_columns=data_prep.FEATURE_COLUMNS,
-    )
     bad = pd.DataFrame({"year": [2015]})    # missing brand, fuel, ...
     with pytest.raises(ValueError, match="missing required columns"):
-        kumo.predict(model=None, context=fake_context, rows_df=bad)
+        kumo.predict(model=None, context=_fake_context(), rows_df=bad)
 
 
 def test_predict_rejects_empty_input():
     from src import model as kumo
 
-    fake_context = SimpleNamespace(feature_columns=data_prep.FEATURE_COLUMNS)
     empty = pd.DataFrame(columns=data_prep.FEATURE_COLUMNS)
     with pytest.raises(ValueError, match="No rows"):
-        kumo.predict(model=None, context=fake_context, rows_df=empty)
+        kumo.predict(model=None, context=_fake_context(), rows_df=empty)
+
+
+def test_predict_rejects_negative_km_with_clear_message():
+    from src import model as kumo
+
+    row = _valid_row(km_driven=-500)
+    with pytest.raises(ValueError, match="cannot be negative"):
+        kumo.predict(model=None, context=_fake_context(), rows_df=row)
+
+
+def test_predict_rejects_missing_value_with_clear_message():
+    from src import model as kumo
+
+    row = _valid_row(fuel=None)
+    with pytest.raises(ValueError, match="Missing value"):
+        kumo.predict(model=None, context=_fake_context(), rows_df=row)
+
+
+def test_predict_rejects_non_numeric_year():
+    from src import model as kumo
+
+    row = _valid_row(year="next year")
+    with pytest.raises(ValueError, match="must be a number"):
+        kumo.predict(model=None, context=_fake_context(), rows_df=row)
+
+
+def test_unseen_brand_warns_but_does_not_raise():
+    from src import model as kumo
+
+    ctx = _fake_context(cat_values={"brand": {"maruti", "hyundai"}})
+    warnings: list[str] = []
+    # No exception: an unseen brand only produces a plain-language warning.
+    kumo.validate_rows(_valid_row(brand="not_a_real_brand_xyz"), ctx, warnings)
+    assert any("not_a_real_brand_xyz" in w for w in warnings)
+
+
+def test_extreme_year_and_km_warn_but_do_not_raise():
+    from src import model as kumo
+
+    ctx = _fake_context(num_ranges={"year": (1991, 2020),
+                                    "km_driven": (1000, 200_000)})
+    warnings: list[str] = []
+    kumo.validate_rows(_valid_row(year=1850, km_driven=900_000), ctx, warnings)
+    assert len(warnings) == 2
+    assert all("outside the training range" in w for w in warnings)
+
+
+def test_output_is_always_ordered_and_positive():
+    """The sanitiser must guarantee low <= price <= high, even on junk."""
+    from src import model as kumo
+
+    ctx = _fake_context(median_price=400_000.0)
+    price, low, high = kumo._sanitise(
+        price=np.array([500_000.0, -1.0, np.nan]),
+        low=np.array([600_000.0, -5.0, -5.0]),
+        high=np.array([400_000.0, 10.0, np.nan]),
+        context=ctx,
+    )
+    assert np.all(np.isfinite(price)) and np.all(np.isfinite(low))
+    assert np.all(price >= kumo.MIN_PREDICTION_PRICE)
+    assert np.all(low <= price) and np.all(price <= high)
+
+
+# ---------------------------------------------------------------------------
+# "Add a new sale" / "Reset context" logic (no GPU needed)
+# ---------------------------------------------------------------------------
+
+def _labeled_sale() -> pd.DataFrame:
+    """A new sale row: the features plus the known selling price."""
+    row = _valid_row(km_driven=12_345)
+    row[data_prep.TARGET_COL] = 350_000.0
+    return row
+
+
+def test_add_new_sale_grows_context_by_one_and_resets():
+    from src import model as kumo
+
+    original = data_prep.clean(_fake_raw()).head(50).reset_index(drop=True)
+    pristine = original.copy()                 # the app keeps this for reset
+
+    grown = kumo.add_sale(original, _labeled_sale())
+    assert len(grown) == len(original) + 1     # +1 row after "Add to context"
+    assert int(grown.iloc[-1]["km_driven"]) == 12_345
+    assert float(grown.iloc[-1][data_prep.TARGET_COL]) == 350_000.0
+
+    # "Reset context" restores the pristine copy, byte for byte.
+    reset = pristine.copy()
+    assert len(reset) == len(original)
+    pd.testing.assert_frame_equal(reset, original)
+
+
+def test_add_sale_rejects_a_row_without_a_price():
+    from src import model as kumo
+
+    original = data_prep.clean(_fake_raw()).head(5).reset_index(drop=True)
+    with pytest.raises(ValueError, match="missing columns"):
+        kumo.add_sale(original, _valid_row())   # no selling_price column
 
 
 # ---------------------------------------------------------------------------
 # Full model tests (skipped unless data + CUDA are present)
 # ---------------------------------------------------------------------------
 
-def _needs_gpu_and_data() -> bool:
-    """True only when both the dataset and a CUDA GPU are available."""
+def _skip_reason() -> str | None:
+    """Why the GPU tests cannot run here, or None when they can."""
+    if not data_prep.DATA_PATH.exists():
+        return "needs data/cars.csv (the dataset is not in place)"
     try:
-        from src import model as kumo
-        return kumo.cuda_available() and data_prep.DATA_PATH.exists()
-    except Exception:            # torch/sdm missing, bad data path, etc.
-        return False
+        from src import model as kumo            # noqa: F401
+    except Exception as exc:
+        return f"needs the sdm/torch packages ({type(exc).__name__}: {exc})"
+    from src import model as kumo
+    if not kumo.cuda_available():
+        return "needs a CUDA GPU (torch.cuda.is_available() is False)"
+    return None
 
 
-_HAS_GPU_AND_DATA = _needs_gpu_and_data()
+_SKIP_REASON = _skip_reason()
 _NEEDS = pytest.mark.skipif(
-    not _HAS_GPU_AND_DATA,
-    reason="needs data/cars.csv and a CUDA GPU",
+    _SKIP_REASON is not None,
+    reason=_SKIP_REASON or "CUDA and dataset available",
 )
 
 
@@ -165,5 +307,40 @@ def test_unseen_brand_does_not_crash():
 
     row = test_df.iloc[[0]].copy()
     row["brand"] = "not_a_real_brand_xyz"
-    price, low, high = kumo.predict(model, context, row)
+    warnings: list[str] = []
+    price, low, high = kumo.predict(model, context, row, warnings_out=warnings)
     assert np.isfinite(price[0]) and low[0] <= price[0] <= high[0]
+    assert any("not_a_real_brand_xyz" in w for w in warnings)
+
+
+@_NEEDS
+def test_context_size_grows_by_one_on_add_and_resets():
+    """The Kumo context itself (not just the DataFrame) follows add/reset."""
+    from src import model as kumo
+
+    train_df, _test = data_prep.load_and_prepare()
+    base = train_df.iloc[:100].reset_index(drop=True)
+
+    context = kumo.build_context(base)
+    grown = kumo.build_context(kumo.add_sale(base, _labeled_sale()))
+    reset = kumo.build_context(base.copy())     # the app's "Reset context"
+
+    assert context.n_rows == 100
+    assert grown.n_rows == context.n_rows + 1
+    assert reset.n_rows == context.n_rows
+
+
+@_NEEDS
+def test_predict_batch_keeps_order_and_range():
+    from src import model as kumo
+
+    train_df, test_df = data_prep.load_and_prepare()
+    model = kumo.load_model(size="small")
+    context = kumo.build_context(train_df.iloc[:1000])
+    sample = test_df.head(5)
+
+    price, low, high = kumo.predict_batch(model, context, sample,
+                                          batch_size=2)   # 3 batches
+    assert len(price) == len(low) == len(high) == 5
+    assert np.all(np.isfinite(price))
+    assert np.all(low <= price) and np.all(price <= high)

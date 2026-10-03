@@ -28,13 +28,13 @@ import matplotlib.ticker                    # noqa: F401  (used below)
 import pandas as pd
 import streamlit as st
 
-from src import data_prep, formatting
+from src import applog, data_prep, formatting
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_SIZE = "small"          # fits the 6 GB RTX 3050 (library default is large!)
+MODEL_SIZE = kumo.DEFAULT_MODEL_SIZE   # benchmark-chosen; fits the 6 GB RTX 3050
 DEFAULT_YEAR = 2018           # slider default, per the brief
 DEFAULT_KM = 50_000           # slider default
 KM_STEP = 1_000               # km slider step
@@ -71,10 +71,19 @@ def _load_everything() -> dict:
     below (session state may not be touched inside cached functions).
     """
     data = _load_data()
-    orig_context_df = data["train_df"]
+    # Use the benchmark-chosen context size (None = every context row).
+    orig_context_df = kumo.limit_context(data["train_df"])
 
     model = kumo.load_model(size=MODEL_SIZE)
     context = kumo.build_context(orig_context_df)
+
+    # Encode the context ONCE here (fit = build the KV cache). Later
+    # predictions then skip re-encoding, which is what makes repeat clicks
+    # fast. If it fails we log it and fall back to encoding per prediction.
+    try:
+        context = kumo.fit_context(model, context)
+    except Exception as exc:
+        applog.log_exception("startup fit_context", exc)
 
     return {"model": model, "context": context,
             "ctx_df": orig_context_df.copy(),
@@ -144,6 +153,11 @@ def _validate_new_sale(df: pd.DataFrame) -> str | None:
 def rebuild_context(new_df: pd.DataFrame):
     """Rebuild the Kumo context tensors from a (possibly extended) table."""
     context = kumo.build_context(new_df)
+    # Re-encode it once, so predictions after an add/reset stay fast.
+    try:
+        context = kumo.fit_context(model, context)
+    except Exception as exc:
+        applog.log_exception("rebuild_context fit_context", exc)
     st.session_state["context"] = context
     st.session_state["ctx_df"] = new_df
     return context
@@ -202,10 +216,10 @@ if not kumo.cuda_available():
 try:
     everything = _load_everything()
 except Exception as exc:                  # e.g. CUDA OOM while tensorizing
-    st.error(
+    applog.log_exception("startup _load_everything", exc)
+    st.error(applog.user_message(
         "Something went wrong while loading the model or building the "
-        "context. Try closing other GPU apps and reloading the page.\n\n"
-        f"Details: `{type(exc).__name__}: {exc}`")
+        "context. Try closing other GPU apps and reloading the page.", exc))
     st.stop()
 model = everything["model"]
 
@@ -295,18 +309,30 @@ with st.sidebar:
                 st.error(problem)
             else:
                 current: pd.DataFrame = st.session_state["ctx_df"]
-                extended = pd.concat(
-                    [current, row[current.columns]], ignore_index=True)
-                rebuild_context(extended)
-                st.success(
-                    f"Added to context ({_label(row.iloc[0].to_dict())} at "
-                    f"{formatting.format_rupees(new_price)}). Context is now "
-                    f"{st.session_state['context'].n_rows:,} rows for this "
-                    "session.")
+                extended = kumo.add_sale(current, row)
+                try:
+                    rebuild_context(extended)
+                except Exception as exc:      # friendly message, no traceback
+                    applog.log_exception("Add to context", exc)
+                    st.error(applog.user_message(
+                        "Could not add that sale to the context. Please "
+                        "check the values and try again.", exc))
+                else:
+                    st.success(
+                        f"Added to context ({_label(row.iloc[0].to_dict())} at "
+                        f"{formatting.format_rupees(new_price)}). Context is now "
+                        f"{st.session_state['context'].n_rows:,} rows for this "
+                        "session.")
         if c2.button("Reset context"):
-            rebuild_context(st.session_state["orig_df"].copy())
-            st.success(f"Context restored to the original "
-                       f"{st.session_state['context'].n_rows:,} rows.")
+            try:
+                rebuild_context(st.session_state["orig_df"].copy())
+            except Exception as exc:          # friendly message, no traceback
+                applog.log_exception("Reset context", exc)
+                st.error(applog.user_message(
+                    "Could not reset the context. Please reload the page.", exc))
+            else:
+                st.success(f"Context restored to the original "
+                           f"{st.session_state['context'].n_rows:,} rows.")
 
     st.caption("The context is the labeled table the model reads at inference "
                "time. Adding or resetting rows only affects this session.")
@@ -369,20 +395,26 @@ if estimate_clicked:
         "owner": st.session_state.owner,
     }
     query = build_row(**values)               # schema-matched one-row DataFrame
+    warnings: list[str] = []                  # plain-language input warnings
     with st.spinner("Predicting..."):
         t0 = time.perf_counter()
         try:
             price, low, high = kumo.predict(
                 model, st.session_state["context"], query,
-                low_q=LOW_Q, high_q=HIGH_Q,
+                low_q=LOW_Q, high_q=HIGH_Q, warnings_out=warnings,
             )
         except Exception as exc:              # friendly message, no traceback
-            st.error(
+            applog.log_exception("Estimate price", exc)
+            st.error(applog.user_message(
                 "Prediction failed. Please try different inputs, and check "
-                "that the NVIDIA GPU is available.\n\n"
-                f"Details: `{type(exc).__name__}: {exc}`")
+                "that the NVIDIA GPU is available.", exc))
             st.stop()
         elapsed = time.perf_counter() - t0
+
+    # Unseen brand, extreme year/km, OOM retries, clipped prices, ...
+    # (dict.fromkeys keeps the order and removes duplicates.)
+    for message in dict.fromkeys(warnings):
+        st.warning(message)
 
     p, lo, hi = float(price[0]), float(low[0]), float(high[0])
     if not (lo <= p <= hi):                   # should never happen; be honest

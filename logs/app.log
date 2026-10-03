@@ -1,0 +1,48 @@
+2026-10-02 23:52:43,815 ERROR Error in Estimate price: CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 5.95 GiB total capacity)
+Traceback (most recent call last):
+  File "C:\Users\Prakash\AppData\Local\Temp\tmpfhwok8hi\b6dae8d06b3d76edd1fed92adfbd7812", line 413, in <module>
+    price, low, high = kumo.predict(
+                       ~~~~~~~~~~~~^
+        model, st.session_state["context"], query,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        low_q=LOW_Q, high_q=HIGH_Q, warnings_out=warnings,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Prakash\AppData\Local\Temp\tmpfhwok8hi\b6dae8d06b3d76edd1fed92adfbd7812", line 29, in _predict_with_one_oom
+    raise kumo.torch.cuda.OutOfMemoryError(
+        "CUDA out of memory. Tried to allocate 2.00 GiB "
+        "(GPU 0; 5.95 GiB total capacity)")
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 5.95 GiB total capacity)
+2026-10-02 23:52:44,371 ERROR Error in Estimate price: CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 5.95 GiB total capacity)
+Traceback (most recent call last):
+  File "C:\Users\Prakash\AppData\Local\Temp\tmpfhwok8hi\b6dae8d06b3d76edd1fed92adfbd7812", line 413, in <module>
+    price, low, high = kumo.predict(
+                       ~~~~~~~~~~~~^
+        model, st.session_state["context"], query,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        low_q=LOW_Q, high_q=HIGH_Q, warnings_out=warnings,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Prakash\AppData\Local\Temp\tmpfhwok8hi\b6dae8d06b3d76edd1fed92adfbd7812", line 29, in _predict_with_one_oom
+    raise kumo.torch.cuda.OutOfMemoryError(
+        "CUDA out of memory. Tried to allocate 2.00 GiB "
+        "(GPU 0; 5.95 GiB total capacity)")
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 5.95 GiB total capacity)
+2026-10-02 23:55:25,328 ERROR Error in Estimate price: CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 5.95 GiB total capacity)
+Traceback (most recent call last):
+  File "C:\Users\Prakash\AppData\Local\Temp\tmprug_2rfo\664adf912557004087c2e0f17f24845f", line 414, in <module>
+    price, low, high = kumo.predict(
+                       ~~~~~~~~~~~~^
+        model, st.session_state["context"], query,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        low_q=LOW_Q, high_q=HIGH_Q, warnings_out=warnings,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Prakash\AppData\Local\Temp\tmprug_2rfo\664adf912557004087c2e0f17f24845f", line 30, in _predict_with_one_oom
+    raise kumo.torch.cuda.OutOfMemoryError(
+        "CUDA out of memory. Tried to allocate 2.00 GiB "
+        "(GPU 0; 5.95 GiB total capacity)")
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 5.95 GiB total capacity)
