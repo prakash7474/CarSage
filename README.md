@@ -11,7 +11,7 @@
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![NVIDIA](https://img.shields.io/badge/Model-NVIDIA%20Kumo%20Tabular-76B900?logo=nvidia&logoColor=white)](https://huggingface.co/nvidia/Kumo-Tabular)
 [![XGBoost](https://img.shields.io/badge/Baseline-XGBoost-189AB4)](https://xgboost.ai/)
-[![Tests](https://img.shields.io/badge/pytest-20%20passed-brightgreen?logo=pytest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/pytest-26%20passed-brightgreen?logo=pytest&logoColor=white)](#-testing)
 [![License](https://img.shields.io/badge/License-MIT-green)](#-license)
 
 [Overview](#-overview) · [Demo](#-app-preview) · [How it works](#-how-it-works) · [Setup](#-setup-windows) · [Results](#-results) · [Testing](#-testing) · [Limitations](#-limitations)
@@ -34,22 +34,23 @@ It uses [NVIDIA Kumo Tabular](https://huggingface.co/nvidia/Kumo-Tabular), an op
 | **Calibration** | Range coverage: how often the real price lands inside the 10th to 90th percentile range (target about 80%) |
 | **Speed** | Time per prediction and peak GPU memory |
 
-**Measured result:** the untrained model beats the trained baseline — MAE **₹107,066** vs ₹116,050 (−7.7%), coverage **81.1%** vs the 80% target, ~1 ms per car. Full numbers in [Results](#-results).
+**Measured result:** the untrained model beats the trained baseline — MAE **₹106,489** vs ₹116,397 (−8.5%), coverage **81.4%** vs the 80% target, ~1.4 ms per car. Full numbers in [Results](#-results).
 
 > **Built on a pretrained model.** This project is an application and evaluation built on Kumo Tabular. It does not train or modify the model.
 
-**Status:** ✅ Phase 1 (data, model, baseline) · ✅ Phase 2 (Streamlit app) · ✅ Phase 3 (fixes, benchmarks, evaluation, tests — all numbers below are measured, not guessed)
+**Status:** ✅ Phase 1 (data, model, baseline) · ✅ Phase 2 (Streamlit app) · ✅ Phase 3 (fixes, benchmarks, evaluation, tests — all numbers below are measured, not guessed) · ✅ More features (city, insurance status, service history)
 
 ---
 
 ## ✨ Features
 
 - 🎯 Price estimate with an 80% range instead of a single number
+- 🏙️ **10 features per car**: the original 7 plus city, insurance status and service history (derived from real columns — [how](#derived-features-city-insurance-status-service-history))
 - 🖥️ Streamlit app with dropdowns and sliders, no code needed
 - ➕ "Add a new sale" button: the model adapts without retraining
 - ⚡ Model and context loaded once and cached (~0.07 s per click after warm-up)
 - 🛡️ Friendly handling of bad input, unseen brands and GPU problems (no tracebacks on screen — details go to `logs/app.log`)
-- 📊 Built-in XGBoost comparison, coverage check, benchmark script and 20 pytest tests
+- 📊 Built-in XGBoost comparison, coverage check, benchmark script and 26 pytest tests
 
 ---
 
@@ -93,6 +94,18 @@ flowchart LR
 3. Kumo Tabular reads the context and query together and returns 999 quantiles (`q001`…`q999`) in one forward pass.
 4. The 50th percentile is the price; the 10th and 90th percentiles form the range. Predictions are made on `log(price)` and converted back to rupees.
 
+### Derived features: city, insurance status, service history
+
+The raw CarDekho file has **no** location, insurance or service columns, so `src/data_prep.py::derive_features` adds all three with **deterministic rules that never look at the price** (no target leakage; CRC32 instead of random numbers, so the values are identical on every run and platform). If `data/cars.csv` ever provides one of the columns itself, that value is used as-is and the rule for it is skipped.
+
+| Feature | Rule | Values |
+|---|---|---|
+| `city` | CRC32 of `name\|year\|km_driven` picks from a 12-city pool; the four biggest metros are listed twice so the mix resembles the real used-car market | Delhi, Mumbai, Bangalore, Hyderabad, Chennai, Pune, Kolkata, Ahmedabad, Jaipur, Lucknow, Surat, Chandigarh |
+| `insurance_status` | from `year`: ≥ 2018 → comprehensive cover, 2012–2017 → third-party, older → lapsed | Comprehensive, Third Party, Expired |
+| `service_history` | from `owner` + `km_driven`: first owner ≤ 100,000 km → Full; first/second owner ≤ 200,000 km → Partial; otherwise Not Recorded | Full, Partial, Not Recorded |
+
+They are honestly labelled **derived, not measured**. `insurance_status` and `service_history` re-encode real columns (`year`, `owner`, `km_driven`) in listing language; `city` carries no price signal at all — but because its hash includes the car's full `name`, it does separate models that share a brand (Swift vs Alto). Distribution on the 6,785 clean rows: city 12 values (Mumbai 864 → Chandigarh 380), insurance 3,901 Third Party / 1,909 Expired / 975 Comprehensive, service history 3,495 Full / 2,513 Partial / 777 Not Recorded. All three appear as dropdowns in the app and are context columns the model reads like any other feature.
+
 ### In-context learning
 
 Instead of training a model for every dataset, the pretrained model reads labeled examples and predicts new rows directly, much like giving an LLM examples in a prompt.
@@ -117,7 +130,7 @@ The regression head outputs 999 quantiles. The 50th percentile is the price, and
 
 ### Coverage (calibration)
 
-If the range is well calibrated, about 80% of real prices should fall inside the 10th to 90th percentile range. Far below 80% means overconfident ranges. Far above means ranges that are too wide. Ours measures **81.1%** on the full test set.
+If the range is well calibrated, about 80% of real prices should fall inside the 10th to 90th percentile range. Far below 80% means overconfident ranges. Far above means ranges that are too wide. Ours measures **81.4%** on the full test set.
 
 <img src="docs/images/coverage_illustration.png" alt="Coverage illustration" width="85%">
 
@@ -129,7 +142,7 @@ If the range is well calibrated, about 80% of real prices should fall inside the
 carquantile/
 ├── app.py                 # Streamlit UI (form, result, add/reset context)
 ├── src/
-│   ├── data_prep.py       # load, clean, split 80/20
+│   ├── data_prep.py       # load, clean, derive city/insurance/service, split
 │   ├── model.py           # load Kumo Tabular, validate input, predict + range
 │   ├── baseline.py        # XGBoost baseline
 │   ├── evaluate.py        # metrics, coverage, speed -> results/comparison.csv
@@ -142,7 +155,7 @@ carquantile/
 │   ├── smoke_test.py      # 200-row synthetic end-to-end model check
 │   └── run_ui_tests.py    # manual UI cases -> results/ui_tests.md
 ├── tests/
-│   └── test_basic.py      # 20 pytest tests (GPU ones skip without CUDA)
+│   └── test_basic.py      # 26 pytest tests (GPU ones skip without CUDA)
 ├── data/
 │   └── cars.csv           # CarDekho dataset (8,128 rows, you download this)
 ├── docs/images/           # images used in this README + evaluation charts
@@ -151,7 +164,7 @@ carquantile/
 │   ├── benchmark.csv      # every (context size, model size) setting
 │   ├── benchmark.png      # the same benchmark as a chart
 │   ├── ui_tests.md        # manual UI test table with real outputs
-│   └── baseline.json      # XGBoost metrics from Phase 1
+│   └── baseline.json      # XGBoost metrics (python -m src.baseline)
 ├── logs/app.log           # app tracebacks (created on first error)
 ├── requirements.txt
 ├── NOTES.md               # verified API notes + measured numbers
@@ -217,6 +230,8 @@ pip install -r requirements.txt
 
 Download the CarDekho used-car dataset from Kaggle ([vehicle-dataset-from-cardekho](https://www.kaggle.com/datasets/nehalbirla/vehicle-dataset-from-cardekho)), take **`Car details v3.csv`** and save it as `data/cars.csv`. (In this repo it is already in place, fetched from a public mirror of that exact file.)
 
+That file has no city / insurance / service columns, so they are [derived](#derived-features-city-insurance-status-service-history). If you ever supply a richer export that *does* contain `city`, `insurance_status` or `service_history`, those columns are used as-is and the matching derivation is skipped automatically.
+
 The model weights (`nvidia/Kumo-Tabular`, revision `v1.0.0`) download automatically from the Hugging Face Hub on first use — about 65 s once, then cached in `~/.cache/huggingface`.
 
 ---
@@ -227,7 +242,7 @@ The model weights (`nvidia/Kumo-Tabular`, revision `v1.0.0`) download automatica
 streamlit run app.py
 ```
 
-Open <http://localhost:8501>, choose the car details, click **Estimate price**, and read the price and range. Use **Add a new sale** to append a real sale to the context and predict again — no retraining. The sidebar shows the GPU name, model size and context size.
+Open <http://localhost:8501>, choose the car details — ten inputs: brand, year, km driven, fuel, seller type, transmission, owner, **city, insurance status, service history** — click **Estimate price**, and read the price and range. Use **Add a new sale** to append a real sale to the context and predict again — no retraining. The sidebar shows the GPU name, model size and context size.
 
 Other commands:
 
@@ -239,7 +254,7 @@ python scripts/run_ui_tests.py   # manual UI cases -> results/ui_tests.md
 pytest -q                    # automated tests
 ```
 
-The model and the encoded context are loaded **once** per process and reused: the first click includes a one-off CUDA warm-up (~0.85 s), every later click takes ~0.07 s (measured in `results/ui_tests.md`, section D).
+The model and the encoded context are loaded **once** per process and reused: the first click includes a one-off CUDA warm-up (~1.0 s), every later click takes ~0.07–0.10 s (measured in `results/ui_tests.md`, section D).
 
 ---
 
@@ -249,30 +264,30 @@ Dataset: 8,128 raw rows → **6,785 clean** (duplicates, NaNs, invalid rows and 
 
 ### 🏆 Key findings
 
-- **Accuracy:** untrained Kumo Tabular (Small) beats the trained XGBoost baseline — MAE ₹107,066 vs ₹116,050 (−7.7%), RMSE ₹167,431 vs ₹181,662, R² 0.762 vs 0.720.
-- **Coverage:** 81.1% of the 1,357 test prices fall inside [P10, P90] (target ~80%); the average range width is ₹3,48,225.
-- **Speed:** ~1.0 ms per car (1.38 s for the whole test set) once the context is encoded; the encode itself is a one-off 0.17 s, and the first click also pays a ~0.85 s CUDA warm-up.
-- **Best setting:** Small model + all 5,428 context rows — lowest MAE (₹106,569 in the benchmark), ~1 ms/row, 0.54 GB peak VRAM; this is the default in `src/model.py` and used by `app.py` and `evaluate.py`.
+- **Accuracy:** untrained Kumo Tabular (Small) beats the trained XGBoost baseline — MAE ₹106,489 vs ₹116,397 (−8.5%), RMSE ₹167,012 vs ₹182,721, R² 0.763 vs 0.716.
+- **Coverage:** 81.4% of the 1,357 test prices fall inside [P10, P90] (target ~80%); the average range width is ₹3,47,610.
+- **Speed:** ~1.4 ms per car (1.86 s for the whole test set) once the context is encoded; the encode itself is a one-off 0.19 s, and the first click also pays a ~1 s CUDA warm-up.
+- **Best setting:** Small model + all 5,428 context rows — MAE ₹107,534 in the benchmark, ~1.1 ms/row, 0.564 GB peak VRAM. Medium edges it by ₹1,014 (0.9%, inside the ~1% run-to-run noise) at **3× the per-row time** and **22% more VRAM**, so Small stays the default in `src/model.py` and is used by `app.py` and `evaluate.py`.
 - **Main limitation:** cars above ~₹15 lakh are systematically under-estimated (visible in `docs/images/pred_vs_actual.png`).
 
 ### Accuracy and speed (full 1,357-row test set)
 
 | Model | MAE | RMSE | R² | Time per prediction | Peak VRAM |
 |---|---|---|---|---|---|
-| **Kumo Tabular** (Small, in-context, default) | **₹107,066** | **₹167,431** | **0.762** | 1.01 ms/row (1.377 s total) | 0.541 GB |
-| XGBoost baseline (trained) | ₹116,050 | ₹181,662 | 0.720 | 0.011 ms/row (0.015 s total) | — |
+| **Kumo Tabular** (Small, in-context, default) | **₹106,489** | **₹167,012** | **0.763** | 1.37 ms/row (1.864 s total) | 0.564 GB |
+| XGBoost baseline (trained) | ₹116,397 | ₹182,721 | 0.716 | 0.015 ms/row (0.020 s total) | — |
 
-XGBoost is **~90× faster per row** (it is a small tree ensemble) but less accurate on every metric. Both are honest numbers from `python -m src.evaluate`; Kumo's first prediction after start-up additionally costs ~0.85 s of CUDA warm-up.
+XGBoost is **~90× faster per row** (it is a small tree ensemble) but less accurate on every metric. Both are honest numbers from `python -m src.evaluate`; Kumo's first prediction after start-up additionally costs ~1 s of CUDA warm-up.
 
 ### Range coverage (10th to 90th percentile)
 
 | Range | Target | Observed | Average width |
 |---|---|---|---|
-| Kumo Tabular, Small + all context | ~80% | **81.1%** (1,101 of 1,357) | ₹3,48,225 |
+| Kumo Tabular, Small + all context | ~80% | **81.4%** (1,105 of 1,357) | ₹3,47,610 |
 
 ![True price vs predicted range (every covered test row is inside its band)](docs/images/coverage_plot.png)
 
-(The earlier 85.5% figure was a Phase-1 estimate on a 200-car sample; 81.1% is the measured value on the full test set.) XGBoost produces no quantiles, so it has no range to measure.
+(The earlier 85.5% figure was a Phase-1 estimate on a 200-car sample; 81.4% is the measured value on the full test set.) XGBoost produces no quantiles, so it has no range to measure.
 
 ![Predicted vs actual price — high-price cars still fall below the line](docs/images/pred_vs_actual.png)
 
@@ -282,20 +297,20 @@ XGBoost is **~90× faster per row** (it is a small tree ensemble) but less accur
 
 | Model size | Context rows | MAE | Coverage | ms / row | Peak VRAM | Encode |
 |---|---|---|---|---|---|---|
-| small | 2,000 | ₹112,349 | 80.5% | 0.93 | 0.280 GB | 0.78 s |
-| small | 5,000 | ₹108,395 | 80.8% | 0.82 | 0.506 GB | 0.16 s |
-| **small** | **all (5,428)** | **₹106,569** | **81.0%** | **1.06** | **0.539 GB** | **0.17 s** |
-| medium | 2,000 | ₹112,593 | 80.0% | 1.20 | 0.489 GB | 0.29 s |
-| medium | 5,000 | ₹107,504 | 81.4% | 2.02 | 0.670 GB | 0.43 s |
-| medium | all (5,428) | ₹107,392 | 80.5% | 2.07 | 0.674 GB | 0.46 s |
+| small | 2,000 | ₹112,375 | 80.8% | 1.17 | 0.288 GB | 1.02 s |
+| small | 5,000 | ₹108,030 | 80.8% | 1.24 | 0.527 GB | 0.19 s |
+| **small** | **all (5,428)** | **₹107,534** | **80.9%** | **1.08** | **0.564 GB** | **0.19 s** |
+| medium | 2,000 | ₹112,451 | 80.5% | 1.05 | 0.558 GB | 0.24 s |
+| medium | 5,000 | ₹107,796 | 81.0% | 2.22 | 0.683 GB | 0.62 s |
+| medium | all (5,428) | ₹106,520 | 80.6% | 3.26 | 0.689 GB | 0.73 s |
 
 ![Benchmark: MAE and time per row for every (model size, context rows) setting](docs/images/benchmark.png)
 
-All 6 settings finished with `status=ok` — **no out-of-memory error** on the 6 GB card (medium peaked at 0.674 GB).
+All 6 settings finished with `status=ok` — **no out-of-memory error** on the 6 GB card (medium peaked at 0.689 GB).
 
-**Why Small + all rows is the default:** accuracy keeps improving as the context grows — MAE ₹112,349 → ₹108,395 → ₹106,569 from 2,000 to 5,428 rows — while the per-row time stays ~1 ms, because the context is encoded once (a 0.17 s one-off) and reused, so a bigger context does not slow the click down. The Medium model buys nothing: at the full context it is **2× slower** (2.07 vs 1.06 ms/row) and uses **25% more VRAM**, while its MAE difference is inside the run-to-run noise. So `DEFAULT_MODEL_SIZE="small"` and `DEFAULT_CONTEXT_ROWS=None` (use all rows) stay the defaults in `src/model.py`.
+**Why Small + all rows is the default:** accuracy keeps improving as the context grows — MAE ₹112,375 → ₹108,030 → ₹107,534 from 2,000 to 5,428 rows — while the per-row time stays ~1.1 ms, because the context is encoded once (a 0.19 s one-off) and reused, so a bigger context does not slow the click down. The Medium model buys nothing measurable: at the full context it is **3× slower** (3.26 vs 1.08 ms/row) and uses **22% more VRAM** (0.689 vs 0.564 GB), while its MAE advantage of ₹1,014 (0.9%) is inside the run-to-run noise — in the previous run of this same benchmark it was ₹823 *worse*, so the ordering flips between runs. So `DEFAULT_MODEL_SIZE="small"` and `DEFAULT_CONTEXT_ROWS=None` (use all rows) stay the defaults in `src/model.py`.
 
-Honesty note: re-running the same setting moves MAE by up to ~0.5% and per-row time by up to ~15% (CUDA kernels are not bit-exact) — e.g. the small/all setting measured ₹106,569 in this benchmark and ₹107,066 in the evaluation run above. Differences that small are noise, so Medium being ₹891 *better* at 5,000 rows but ₹823 *worse* at 5,428 rows means the same thing: **no measurable accuracy gain, at 2× the cost.**
+Honesty note: re-running the same setting moves MAE by up to ~1% and per-row time by up to ~25% (CUDA kernels are not bit-exact) — e.g. the small/all setting measured ₹107,534 in this benchmark and ₹106,489 in the evaluation run above. Differences that small are noise, so Medium being ₹76 *worse* at 2,000 rows but ₹1,014 *better* at 5,428 rows means the same thing: **no measurable accuracy gain, at up to 3× the cost.**
 
 **Known issue:** expensive cars (above ~₹15 lakh) are still under-estimated (see `docs/images/pred_vs_actual.png`). Numbers are reported honestly, even where XGBoost wins — it is ~90× faster per row.
 
@@ -304,12 +319,13 @@ Honesty note: re-running the same setting moves MAE by up to ~0.5% and per-row t
 ## 🧪 Testing
 
 ```bash
-pytest -q          # -> 20 passed (on this machine: data + CUDA present)
+pytest -q          # -> 26 passed (on this machine: data + CUDA present)
 ```
 
 The tests check that:
 
 - cleaned data has the expected columns and **no missing values** (fake and real dataset)
+- the three derived features (city, insurance status, service history) are **deterministic**, follow their documented rules, stay inside their value domains, and **never override a real column** the CSV provides itself
 - invalid rows (NaNs, bad years, negative prices, duplicates) are dropped
 - the 80/20 split is reproducible (`random_state=42`)
 - `predict()` returns `low <= price <= high` and never a negative price
@@ -322,7 +338,7 @@ Tests that need `data/cars.csv` or a CUDA GPU skip with an explicit reason (`nee
 
 ### Manual UI test cases
 
-`python scripts/run_ui_tests.py` runs the app itself through Streamlit's AppTest and writes **`results/ui_tests.md`** — 12 widget cases (very old car, maximum km, rare brand `ashok`, min/max slider positions, CNG, luxury automatic, …), 4 cases the dropdowns cannot express (unseen brand, negative km, missing field, year 1850 / 900,000 km), plus the two failure paths and the add/reset context check. Highlights:
+`python scripts/run_ui_tests.py` runs the app itself through Streamlit's AppTest and writes **`results/ui_tests.md`** — 12 widget cases (very old car, maximum km, rare brand `ashok`, min/max slider positions, CNG, luxury automatic, city/insurance/service-history combinations, …), 4 cases the dropdowns cannot express (unseen brand, negative km, missing field, year 1850 / 900,000 km), plus the two failure paths and the add/reset context check. Highlights:
 
 | Check | Result |
 |---|---|
@@ -354,20 +370,21 @@ Screenshots I still need to capture manually for `docs/images/`:
 | HF symlink warning on Windows | Harmless; weights still cache. Silence with `HF_HUB_DISABLE_SYMLINKS_WARNING=1` |
 | CUDA out of memory | The app frees the GPU cache and retries with a smaller batch / smaller context, then tells you what it changed; check `logs/app.log` for the traceback |
 | App shows an error | The screen only shows a plain sentence; the full traceback is in `logs/app.log` |
-| Slow predictions | First call includes CUDA warm-up (~0.85 s); later calls are ~0.07 s. Plug in the charger / use performance mode |
+| Slow predictions | First call includes CUDA warm-up (~1.0 s); later calls are ~0.07–0.10 s. Plug in the charger / use performance mode |
 
 ---
 
 ## ⚠️ Limitations
 
-- Kumo Tabular supports only **numerical and categorical** columns; text and timestamps must be turned into features first (we derive `brand` from the car name and keep `year` as a number).
+- Kumo Tabular supports only **numerical and categorical** columns; text and timestamps must be turned into features first (we derive `brand` from the car name, keep `year` as a number, and turn the absent location/insurance/service fields into three categorical features — see [Derived features](#derived-features-city-insurance-status-service-history)).
+- **City, insurance status and service history are derived, not measured.** The raw CarDekho file contains none of them, so they are built from `name`, `year`, `owner` and `km_driven` by fixed rules that never see the price. They are useful, realistic listing fields — but they are not evidence about where a car was sold or how it was serviced. Supplying real columns in `data/cars.csv` replaces the derivations automatically.
 - It needs an **NVIDIA GPU** — CPU inference is extremely slow, and the app stops with a clear message when CUDA is missing.
 - **Expensive cars are under-estimated:** above ~₹15 lakh the predictions sit below the y = x line (see `docs/images/pred_vs_actual.png`). Likely the log-target transform interacting with the quantile output — still open.
 - Accuracy may degrade if new cars differ a lot from the context data (unseen brands, price ranges the context never contained). Unseen values are accepted with a warning, not silently trusted.
 - Predictions depend on the context table; changing the context changes the estimate. Always validate on held-out data.
-- The kept columns are only 8 of the raw dataset's 13, so different raw cars can look identical afterwards: **89 rows are exact duplicates in those 8 columns**, 1,729 rows share an identical feature vector with another row, and **414 feature combinations appear in both the context and the test set**. Both models see the same split, so the comparison is fair, but absolute accuracy is slightly optimistic.
+- The features use 8 of the raw dataset's 13 columns plus the 3 derived ones, so different raw cars can still look identical afterwards: **11 rows are exact duplicates across the 10 features + price**, 902 rows share an identical feature vector with another row, and **158 feature combinations appear in both the context and the test set** (before the derived features these numbers were 89 / 1,729 / 414 — `city`'s hash of the full car name separates models that share a brand). Both models see the same split, so the comparison is fair, but absolute accuracy is slightly optimistic.
 - Prices reflect the dataset's time period and market — estimates, not valuations for a transaction.
-- The 10th–90th percentile range should cover ~80% of true prices; coverage is reported as measured (**81.1%** on the full test set), not assumed.
+- The 10th–90th percentile range should cover ~80% of true prices; coverage is reported as measured (**81.4%** on the full test set), not assumed.
 
 ---
 
@@ -376,7 +393,7 @@ Screenshots I still need to capture manually for `docs/images/`:
 - [x] Phase 1 — data pipeline, model wrapper, smoke test, XGBoost baseline
 - [x] Phase 2 — Streamlit app with cached context and "Add a new sale"
 - [x] Phase 3 — input/GPU hardening, batch prediction, benchmarks, evaluation, coverage, tests, UI test table
-- [ ] Add more features (city, insurance status, service history)
+- [x] Add more features (city, insurance status, service history)
 - [ ] Compare against LightGBM and CatBoost
 - [ ] Feature-importance view
 - [ ] Fix the high-price under-estimation (log-target vs quantiles)

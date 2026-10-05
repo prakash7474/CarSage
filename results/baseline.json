@@ -3,10 +3,10 @@
   "log_target": true,
   "n_context": 5428,
   "n_test": 1357,
-  "mae": 116050.12535118828,
-  "rmse": 181661.8922966316,
-  "r2": 0.7197630515824613,
-  "train_seconds": 0.687,
-  "predict_seconds": 0.01,
-  "seconds_per_prediction": 7e-06
+  "mae": 116397.27001197495,
+  "rmse": 182721.02529081423,
+  "r2": 0.7164858267724605,
+  "train_seconds": 1.659,
+  "predict_seconds": 0.028,
+  "seconds_per_prediction": 2e-05
 }

@@ -11,6 +11,15 @@ text/timestamp column is either dropped or converted:
   - `fuel`, `seller_type`, `transmission`, `owner` -> categorical strings
   - `selling_price` -> the target (numerical)
 
+Three extra categoricals are *derived* from those real columns, because the
+raw CarDekho file has no location, insurance or service columns of its own:
+  - `city`             stable hash of name|year|km -> a realistic city mix
+  - `insurance_status` from `year` (newer cars keep comprehensive cover)
+  - `service_history`  from `owner` and `km_driven`
+The rules are deterministic (no randomness, never look at the price) and are
+documented in README ("How it works") and NOTES.md. If the raw CSV already
+provides any of these columns itself, that column is used as-is instead.
+
 Run me directly for a quick summary:
     python -m src.data_prep
 """
@@ -19,6 +28,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from zlib import crc32
 
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
@@ -42,10 +52,20 @@ FEATURE_COLUMNS = [
     "seller_type",
     "transmission",
     "owner",
+    "city",
+    "insurance_status",
+    "service_history",
 ]
 
+#: Features the raw CarDekho file does not contain; `derive_features` adds
+#: them unless the CSV already provides the column itself.
+DERIVED_COLUMNS = ["city", "insurance_status", "service_history"]
+
 #: Which feature columns are categorical (strings) vs numerical (numbers).
-CATEGORICAL_COLUMNS = ["brand", "fuel", "seller_type", "transmission", "owner"]
+CATEGORICAL_COLUMNS = [
+    "brand", "fuel", "seller_type", "transmission", "owner",
+    "city", "insurance_status", "service_history",
+]
 NUMERICAL_COLUMNS = ["year", "km_driven"]
 
 #: Sanity bounds used to drop obviously invalid rows.
@@ -97,11 +117,101 @@ def _extract_brand(name: object) -> str:
     return name.strip().split()[0].lower()
 
 
+# ---------------------------------------------------------------------------
+# Derived features (city, insurance status, service history)
+#
+# The raw CarDekho file has no location/insurance/service columns, so these
+# three are derived from real columns with deterministic rules. They never
+# look at `selling_price`, so there is no target leakage, and they produce
+# the same values on every run and platform (CRC32, no RNG). If the raw CSV
+# already contains one of the columns, it is kept as-is.
+# ---------------------------------------------------------------------------
+
+#: City pool used when the raw file has no location column. The four biggest
+#: metros appear twice, so the mix resembles the real used-car market.
+CITY_POOL = [
+    "Delhi", "Mumbai", "Bangalore", "Hyderabad",
+    "Delhi", "Mumbai", "Bangalore", "Pune",
+    "Chennai", "Pune", "Kolkata", "Ahmedabad",
+    "Jaipur", "Lucknow", "Surat", "Chandigarh",
+]
+
+#: Insurance-status buckets by manufacturing year (real-world rule of thumb:
+#: recent cars still carry comprehensive cover, mid-age cars only third-party
+#: cover, old cars' insurance has lapsed).
+INSURANCE_COMPREHENSIVE_MIN_YEAR = 2018
+INSURANCE_THIRD_PARTY_MIN_YEAR = 2012
+
+#: Service-history buckets by owner count and mileage (fewer owners and fewer
+#: kilometres make a complete service record more likely).
+SERVICE_HISTORY_FULL_MAX_KM = 100_000
+SERVICE_HISTORY_PARTIAL_MAX_KM = 200_000
+
+
+def _derive_city(df: pd.DataFrame) -> pd.Series:
+    """A stable pseudo-location per car, picked from :data:`CITY_POOL`.
+
+    Keyed on the car's identifying fields (`name` or `brand`, `year`,
+    `km_driven`) via CRC32, so the same car always maps to the same city and
+    re-running the pipeline changes nothing. The hash never sees the price.
+    """
+    name = (df["name"] if "name" in df.columns
+            else df["brand"] if "brand" in df.columns else "")
+    key = (name.astype(str) + "|" + df["year"].astype(str)
+           + "|" + df["km_driven"].astype(str))
+    return pd.Series(
+        [CITY_POOL[crc32(k.encode("utf-8")) % len(CITY_POOL)] for k in key],
+        index=df.index,
+        dtype=object,
+    )
+
+
+def _derive_insurance_status(year: pd.Series) -> pd.Series:
+    """Comprehensive / Third Party / Expired from the manufacturing year."""
+    status = pd.Series("Expired", index=year.index, dtype=object)
+    status[year >= INSURANCE_THIRD_PARTY_MIN_YEAR] = "Third Party"
+    status[year >= INSURANCE_COMPREHENSIVE_MIN_YEAR] = "Comprehensive"
+    return status
+
+
+def _derive_service_history(owner: pd.Series, km_driven: pd.Series) -> pd.Series:
+    """Full / Partial / Not Recorded from owner count and mileage."""
+    full = owner.eq("First Owner") & km_driven.le(SERVICE_HISTORY_FULL_MAX_KM)
+    partial = (owner.isin(("First Owner", "Second Owner"))
+               & km_driven.le(SERVICE_HISTORY_PARTIAL_MAX_KM) & ~full)
+    history = pd.Series("Not Recorded", index=owner.index, dtype=object)
+    history[partial] = "Partial"
+    history[full] = "Full"
+    return history
+
+
+def derive_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add the derived feature columns that are missing from ``df``.
+
+    Columns the CSV already provides are left untouched. A derived column is
+    skipped (left absent) when its source column is missing, so a broken CSV
+    still fails with the honest "missing expected columns" error instead of a
+    KeyError inside the derivation.
+    """
+    out = df.copy()
+    if "city" not in out.columns and "year" in out.columns \
+            and "km_driven" in out.columns:
+        out["city"] = _derive_city(out)
+    if "insurance_status" not in out.columns and "year" in out.columns:
+        out["insurance_status"] = _derive_insurance_status(out["year"])
+    if "service_history" not in out.columns and "owner" in out.columns \
+            and "km_driven" in out.columns:
+        out["service_history"] = _derive_service_history(
+            out["owner"], out["km_driven"])
+    return out
+
+
 def clean(df: pd.DataFrame) -> pd.DataFrame:
     """Clean the raw dataframe and return a canonical feature table.
 
     Steps:
-      1. derive `brand` from `name`
+      1. derive `brand` from `name`, plus city / insurance status /
+         service history when the raw file does not provide them
       2. drop rows with missing values in any needed column
       3. drop duplicate rows
       4. drop invalid rows (bad year / non-positive price or km)
@@ -121,9 +231,11 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # 1. brand from the first word of the car name.
+    # 1. brand from the first word of the car name, plus the derived
+    #    features (city / insurance status / service history).
     if "name" in df.columns:
         df["brand"] = df["name"].map(_extract_brand)
+    df = derive_features(df)
 
     needed = FEATURE_COLUMNS + [TARGET_COL]
     missing = [c for c in needed if c not in df.columns]
@@ -202,6 +314,9 @@ def get_ui_options(df: pd.DataFrame) -> dict:
         "seller_type": sorted(df["seller_type"].unique().tolist()),
         "transmission": sorted(df["transmission"].unique().tolist()),
         "owner": sorted(df["owner"].unique().tolist()),
+        "city": sorted(df["city"].unique().tolist()),
+        "insurance_status": sorted(df["insurance_status"].unique().tolist()),
+        "service_history": sorted(df["service_history"].unique().tolist()),
         "year": (int(df["year"].min()), int(df["year"].max())),
         "km_driven": (int(df["km_driven"].min()),
                       int(df["km_driven"].max())),

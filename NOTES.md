@@ -177,6 +177,30 @@ mileage, engine, max_power, torque, seats`.
 
 Download it (Kaggle login required) and save it as **`data/cars.csv`**.
 
+### Derived features: `city`, `insurance_status`, `service_history`
+
+The file above has **no** location, insurance or service columns (the
+roadmap item "Add more features (city, insurance status, service history)"
+asked for them anyway), so `src/data_prep.py::derive_features` adds them.
+Rules are fixed constants + CRC32 — no RNG, no `datetime.now()`, and they
+never read `selling_price`, so there is no target leakage and every run
+produces byte-identical columns. If the CSV itself provides one of the
+columns, it is used as-is and the rule is skipped (a richer export simply
+overrides the derivation).
+
+| Column | Rule | Values (frequency on the 6,785 clean rows) |
+|---|---|---|
+| `city` | `crc32(name\|year\|km_driven) % 16` into `CITY_POOL` (12 Indian metros; Delhi/Mumbai/Bangalore/Pune listed twice) | Mumbai 864, Bangalore 843, Delhi 827, Pune 818, Kolkata 470, Hyderabad 465, Ahmedabad 447, Jaipur 434, Surat 430, Lucknow 408, Chennai 399, Chandigarh 380 |
+| `insurance_status` | `year >= 2018` → Comprehensive; `year >= 2012` → Third Party; else Expired | Third Party 3,901, Expired 1,909, Comprehensive 975 |
+| `service_history` | First Owner & ≤100,000 km → Full; First/Second Owner & ≤200,000 km → Partial; else Not Recorded | Full 3,495, Partial 2,513, Not Recorded 777 |
+
+`insurance_status` and `service_history` are re-encodings of real columns;
+`city` carries no price signal (hash of identifying fields only), though the
+hash includes the full `name`, so it does separate models within a brand.
+Because `dropna`/`drop_duplicates` run afterwards on the same rows, the clean
+dataset stays at **6,785 rows** and the split at **5,428 / 1,357** — only the
+feature set grows (7 → 10 features).
+
 ## 6. Measured on this machine (Phase 1 smoke test, 2026-10-01)
 
 Environment: Windows 11, Python 3.13.14, torch 2.11.0+cu128,

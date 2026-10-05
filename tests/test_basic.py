@@ -80,6 +80,71 @@ def test_brand_is_first_word_lowercased():
     assert set(clean["brand"]).issubset({"maruti", "hyundai", "honda", "toyota"})
 
 
+# ---------------------------------------------------------------------------
+# Derived features: city, insurance status, service history
+# ---------------------------------------------------------------------------
+
+def test_derived_features_exist_and_are_deterministic():
+    """clean() adds the three derived columns, with the same values twice."""
+    clean1 = data_prep.clean(_fake_raw())
+    clean2 = data_prep.clean(_fake_raw())
+    for col in data_prep.DERIVED_COLUMNS:
+        assert col in clean1.columns
+    pd.testing.assert_frame_equal(clean1, clean2)   # no randomness anywhere
+
+
+def test_derived_values_stay_inside_the_documented_domains():
+    clean = data_prep.clean(_fake_raw())
+    assert set(clean["city"]).issubset(set(data_prep.CITY_POOL))
+    assert set(clean["insurance_status"]).issubset(
+        {"Comprehensive", "Third Party", "Expired"})
+    assert set(clean["service_history"]).issubset(
+        {"Full", "Partial", "Not Recorded"})
+
+
+def test_insurance_status_follows_the_year_rule():
+    clean = data_prep.clean(_fake_raw())
+    assert (clean.loc[clean["year"] >= data_prep.INSURANCE_COMPREHENSIVE_MIN_YEAR,
+                      "insurance_status"] == "Comprehensive").all()
+    mid = clean[(clean["year"] >= data_prep.INSURANCE_THIRD_PARTY_MIN_YEAR)
+                & (clean["year"] < data_prep.INSURANCE_COMPREHENSIVE_MIN_YEAR)]
+    assert (mid["insurance_status"] == "Third Party").all()
+    assert (clean.loc[clean["year"] < data_prep.INSURANCE_THIRD_PARTY_MIN_YEAR,
+                      "insurance_status"] == "Expired").all()
+
+
+def test_service_history_follows_owner_and_km_rule():
+    clean = data_prep.clean(_fake_raw())
+    full = ((clean["owner"] == "First Owner")
+            & (clean["km_driven"] <= data_prep.SERVICE_HISTORY_FULL_MAX_KM))
+    partial = (~full
+               & clean["owner"].isin(["First Owner", "Second Owner"])
+               & (clean["km_driven"] <= data_prep.SERVICE_HISTORY_PARTIAL_MAX_KM))
+    assert (clean.loc[full, "service_history"] == "Full").all()
+    assert (clean.loc[partial, "service_history"] == "Partial").all()
+    assert (clean.loc[~(full | partial), "service_history"]
+            == "Not Recorded").all()
+
+
+def test_raw_csv_columns_win_over_the_derivation():
+    """A richer CSV that already has the columns is used as-is."""
+    raw = _fake_raw()
+    raw["city"] = "Mumbai"
+    raw["insurance_status"] = "Comprehensive"
+    raw["service_history"] = "Full"
+    clean = data_prep.clean(raw)
+    assert clean["city"].eq("Mumbai").all()
+    assert clean["insurance_status"].eq("Comprehensive").all()
+    assert clean["service_history"].eq("Full").all()
+
+
+def test_ui_options_include_the_derived_features():
+    clean = data_prep.clean(_fake_raw())
+    opts = data_prep.get_ui_options(clean)
+    for col in data_prep.DERIVED_COLUMNS:
+        assert opts[col] == sorted(clean[col].unique().tolist())
+
+
 def test_split_is_80_20_and_reproducible():
     clean = data_prep.clean(_fake_raw())
     train1, test1 = data_prep.split(clean)
@@ -138,6 +203,9 @@ def _valid_row(**overrides) -> pd.DataFrame:
         "seller_type": "Individual",
         "transmission": "Manual",
         "owner": "First Owner",
+        "city": "Mumbai",
+        "insurance_status": "Third Party",
+        "service_history": "Full",
     }
     row.update(overrides)
     return pd.DataFrame([row])[data_prep.FEATURE_COLUMNS]

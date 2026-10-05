@@ -11,3 +11,13 @@ __pycache__/
 .pytest_cache/
 .streamlit/
 keys.csv
+
+# Runtime log (written by the app and the UI tests on every error) and
+# scratch files from local runs
+logs/
+*.tmp
+
+# OS noise (this is a Windows project)
+Thumbs.db
+desktop.ini
+.DS_Store

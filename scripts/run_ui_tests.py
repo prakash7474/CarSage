@@ -42,7 +42,8 @@ OUT_PATH = ROOT / "results" / "ui_tests.md"
 LOG_PATH = ROOT / "logs" / "app.log"
 TIMEOUT = 300
 
-TEXT_KEYS = ("brand", "fuel", "seller_type", "transmission", "owner")
+TEXT_KEYS = ("brand", "fuel", "seller_type", "transmission", "owner",
+             "city", "insurance_status", "service_history")
 NUM_KEYS = ("year", "km_driven")
 
 
@@ -60,18 +61,28 @@ def build_widget_cases(train_df) -> list[dict]:
     rare_brand = str(counts.index[-1])           # least common brand
     luxury = "bmw" if "bmw" in opts["brand"] else opts["brand"][-1]
 
-    def case(title, brand, year, km, fuel, seller, trans, owner, note):
-        return {"title": title, "note": note,
-                "values": {"brand": brand, "year": year, "km_driven": km,
-                           "fuel": fuel, "seller_type": seller,
-                           "transmission": trans, "owner": owner}}
+    def case(title, brand, year, km, fuel, seller, trans, owner, note,
+             city=None, insurance=None, service=None):
+        values = {"brand": brand, "year": year, "km_driven": km,
+                  "fuel": fuel, "seller_type": seller,
+                  "transmission": trans, "owner": owner}
+        # The three newer dropdowns keep the form defaults unless a case
+        # picks a specific value to exercise them.
+        if city is not None:
+            values["city"] = city
+        if insurance is not None:
+            values["insurance_status"] = insurance
+        if service is not None:
+            values["service_history"] = service
+        return {"title": title, "note": note, "values": values}
 
     return [
         case("Typical car (form defaults)", "maruti", 2018, 50_000, "Diesel",
              "Individual", "Manual", "First Owner", "everyday case"),
         case("Very old car (oldest year)", "maruti", year_min, 80_000,
              "Petrol", "Individual", "Manual", "First Owner",
-             "edge: oldest year in the data"),
+             "edge: oldest year in the data",
+             city="Kolkata", insurance="Expired", service="Partial"),
         case("Very high km (max slider)", "hyundai", 2015, km_max, "Diesel",
              "Individual", "Manual", "Second Owner",
              "edge: maximum km_driven"),
@@ -85,10 +96,12 @@ def build_widget_cases(train_df) -> list[dict]:
              "Dealer", "Manual", "First Owner",
              "edge: least common brand in the data"),
         case("Luxury automatic", luxury, 2019, 30_000, "Petrol", "Dealer",
-             "Automatic", "First Owner", "high price bracket"),
+             "Automatic", "First Owner", "high price bracket",
+             city="Delhi", insurance="Comprehensive", service="Full"),
         case("Old + maximum km + third owner", "hyundai", year_min, km_max,
              "Diesel", "Individual", "Manual", "Third Owner",
-             "edge: worst-case age and mileage"),
+             "edge: worst-case age and mileage",
+             city="Jaipur", insurance="Expired", service="Not Recorded"),
         case("CNG + dealer", "maruti", 2020, 20_000, "CNG", "Dealer",
              "Manual", "First Owner", "unusual fuel/seller combination"),
         case("Nearly new automatic", "hyundai", year_max, 15_000, "Petrol",
@@ -166,7 +179,10 @@ def run_widget_cases() -> tuple[list[dict], list[str]]:
             "input": (f"{values['brand']}, {values['year']}, "
                       f"{values['km_driven']:,} km, {values['fuel']}, "
                       f"{values['seller_type']}, {values['transmission']}, "
-                      f"{values['owner']}"),
+                      f"{values['owner']}"
+                      + (f", {values['city']}, {values['insurance_status']}, "
+                         f"{values['service_history']}"
+                         if "city" in values else "")),
             "estimate": metric or "(no result)",
             "range": range_text or "-",
             "messages": "; ".join(errors + warnings) or "none",
@@ -204,7 +220,8 @@ def run_model_layer_cases() -> list[dict]:
 
     base = dict(brand="maruti", year=2018, km_driven=50_000, fuel="Diesel",
                 seller_type="Individual", transmission="Manual",
-                owner="First Owner")
+                owner="First Owner", city="Mumbai",
+                insurance_status="Third Party", service_history="Full")
 
     # 1. unseen brand -> warning, still a result
     row = app.build_row(**{**base, "brand": "not_a_real_brand_xyz"})
@@ -373,8 +390,12 @@ def check_cuda_oom() -> dict:
         time.sleep(0.5)
         new_log = ""
         if LOG_PATH.exists():
-            new_log = LOG_PATH.read_text(encoding="utf-8",
-                                         errors="replace")[before:]
+            # Slice BYTES: `before` comes from stat().st_size, while
+            # read_text() normalises CRLF to LF and would shift every
+            # character offset (that mismatch made this check report a
+            # false "not logged").
+            new_log = LOG_PATH.read_bytes()[before:].decode("utf-8",
+                                                            errors="replace")
 
         # A second click must work again (the app recovered).
         btn = next(b for b in at.button if b.label == "Estimate price")

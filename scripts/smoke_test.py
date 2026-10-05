@@ -20,7 +20,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from src import model as kumo
+from src import data_prep, model as kumo
 
 N_CONTEXT = 200     # tiny on purpose: fast first download/compile on a 6GB GPU
 N_QUERY = 20
@@ -69,6 +69,9 @@ def make_synthetic(
             "seller_type": seller_type, "transmission": transmission,
             "owner": owner,
         })
+        # Same derived features the real pipeline adds (city, insurance
+        # status, service history), so the schema matches data_prep.clean().
+        df = data_prep.derive_features(df)
         if with_target:
             df["selling_price"] = price.round(-2)
         return df

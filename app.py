@@ -47,6 +47,9 @@ DEFAULT_FUEL = "Diesel"
 DEFAULT_SELLER_TYPE = "Individual"
 DEFAULT_TRANSMISSION = "Manual"
 DEFAULT_OWNER = "First Owner"
+DEFAULT_CITY = "Mumbai"                 # most common city in the dataset
+DEFAULT_INSURANCE_STATUS = "Third Party"  # most common insurance status
+DEFAULT_SERVICE_HISTORY = "Full"         # most common service history
 
 
 # ---------------------------------------------------------------------------
@@ -105,19 +108,21 @@ def _default_index(options_list: list[str], preferred: str) -> int:
 def _label(row: dict) -> str:
     """Human-readable label for a car (dict of feature values)."""
     return (f"{row['brand']} {row['year']}, {int(row['km_driven']):,} km, "
-            f"{row['fuel']}, {row['transmission']}, {row['owner']}")
+            f"{row['fuel']}, {row['transmission']}, {row['owner']}, "
+            f"{row['city']}")
 
 
 def build_row(brand: str, year: int, km_driven: int, fuel: str,
               seller_type: str, transmission: str, owner: str,
+              city: str, insurance_status: str, service_history: str,
               price: float | None = None) -> pd.DataFrame:
     """Build a one-row DataFrame with the context's exact schema.
 
     Columns, order and dtypes match the context table (verified in Phase 1):
-    brand/fuel/seller_type/transmission/owner are strings, year/km_driven
-    are ints, and selling_price (only when labeling a new sale) is float.
-    predict() re-casts against the context schema, but matching dtypes here
-    keeps the bug surface at zero.
+    brand/fuel/seller_type/transmission/owner/city/insurance_status/
+    service_history are strings, year/km_driven are ints, and selling_price
+    (only when labeling a new sale) is float. predict() re-casts against the
+    context schema, but matching dtypes here keeps the bug surface at zero.
     """
     row = {
         "brand": str(brand),
@@ -127,6 +132,9 @@ def build_row(brand: str, year: int, km_driven: int, fuel: str,
         "seller_type": str(seller_type),
         "transmission": str(transmission),
         "owner": str(owner),
+        "city": str(city),
+        "insurance_status": str(insurance_status),
+        "service_history": str(service_history),
     }
     if price is not None:                      # labeled row for "Add a new sale"
         row[data_prep.TARGET_COL] = float(price)
@@ -288,6 +296,20 @@ with st.sidebar:
         st.selectbox("Owner", options["owner"],
                      index=_default_index(options["owner"], DEFAULT_OWNER),
                      key="sale_owner")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.selectbox("City", options["city"],
+                         index=_default_index(options["city"], DEFAULT_CITY),
+                         key="sale_city")
+        with c2:
+            st.selectbox("Insurance status", options["insurance_status"],
+                         index=_default_index(options["insurance_status"],
+                                              DEFAULT_INSURANCE_STATUS),
+                         key="sale_insurance_status")
+        st.selectbox("Service history", options["service_history"],
+                     index=_default_index(options["service_history"],
+                                          DEFAULT_SERVICE_HISTORY),
+                     key="sale_service_history")
         new_price = st.number_input(
             "Actual selling price (Rs)",
             min_value=float(data_prep.MIN_PRICE),
@@ -302,6 +324,9 @@ with st.sidebar:
                 st.session_state.sale_km_driven, st.session_state.sale_fuel,
                 st.session_state.sale_seller_type,
                 st.session_state.sale_transmission, st.session_state.sale_owner,
+                st.session_state.sale_city,
+                st.session_state.sale_insurance_status,
+                st.session_state.sale_service_history,
                 price=new_price,
             )
             problem = _validate_new_sale(row)
@@ -371,6 +396,22 @@ with c2:
                  index=_default_index(options["owner"], DEFAULT_OWNER),
                  key="owner")
 
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.selectbox("City", options["city"],
+                 index=_default_index(options["city"], DEFAULT_CITY),
+                 key="city")
+with c2:
+    st.selectbox("Insurance status", options["insurance_status"],
+                 index=_default_index(options["insurance_status"],
+                                      DEFAULT_INSURANCE_STATUS),
+                 key="insurance_status")
+with c3:
+    st.selectbox("Service history", options["service_history"],
+                 index=_default_index(options["service_history"],
+                                      DEFAULT_SERVICE_HISTORY),
+                 key="service_history")
+
 estimate_clicked = st.button("Estimate price", type="primary")
 
 if not estimate_clicked:
@@ -393,6 +434,9 @@ if estimate_clicked:
         "seller_type": st.session_state.seller_type,
         "transmission": st.session_state.transmission,
         "owner": st.session_state.owner,
+        "city": st.session_state.city,
+        "insurance_status": st.session_state.insurance_status,
+        "service_history": st.session_state.service_history,
     }
     query = build_row(**values)               # schema-matched one-row DataFrame
     warnings: list[str] = []                  # plain-language input warnings
